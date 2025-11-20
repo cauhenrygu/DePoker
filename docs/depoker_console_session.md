@@ -30,9 +30,12 @@ p2.address
 // '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
 p3.address
 // '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+```
 
 
-2. 创建房间（buy-in = 1 ETH）
+## 2. 创建房间（buy-in = 1 ETH）
+
+```js
 const buyIn = ethers.parseEther("1.0");
 
 const tx = await depoker.connect(owner).createRoom(buyIn);
@@ -51,9 +54,12 @@ await depoker.getRoom(roomId);
 //   '0x0000000000000000000000000000000000000000',// winner
 //   1763631487n                                  // createdAt
 // ]
+```
 
 
-3. 三个玩家加入房间
+## 3. 三个玩家加入房间
+
+```js
 await depoker.connect(p1).joinRoom(roomId, { value: buyIn });
 await depoker.connect(p2).joinRoom(roomId, { value: buyIn });
 await depoker.connect(p3).joinRoom(roomId, { value: buyIn });
@@ -68,24 +74,33 @@ await depoker.getPlayers(roomId);
 //   '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
 //   '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
 // ]
+```
 
 
-4. 开始游戏（锁定房间）
+## 4. 开始游戏（锁定房间）
+
+```js
 await depoker.connect(owner).startRoom(roomId);
 
 await depoker.getRoom(roomId);
 // started: true
 // settled: false
+```
 
 
-5. 投票选赢家（假设 p2 获胜）
+## 5. 投票选赢家（假设 p2 获胜）
+
+```js
 await depoker.connect(p1).voteWinner(roomId, p2.address);
 await depoker.connect(p2).voteWinner(roomId, p2.address);
 await depoker.connect(p3).voteWinner(roomId, p3.address);
 // 此时：p2 得到 2 票，p3 得到 1 票
+```
 
 
-6. 结算（finalize）
+## 6. 结算（finalize）
+
+```js
 await depoker.connect(owner).finalize(roomId, p2.address);
 
 await depoker.getRoom(roomId);
@@ -99,9 +114,13 @@ await depoker.getRoom(roomId);
 //   winner: p2,
 //   createdAt: 1763631487
 // ]
+```
 
 
-7. 查看赢家余额变化（示例）
+## 7. 查看赢家余额变化（示例）
+
+```js
 (await ethers.provider.getBalance(p2.address)).toString();
 // '10001999904014739891768'
+```
 
