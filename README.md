@@ -94,9 +94,17 @@ Key files in this repository:
 
 Make sure you have:
 
-Node.js ≥ 20 (LTS recommended)
-npm (comes with Node)
-git (if cloning from GitHub)
+- **Node.js** ≥ 20 (LTS recommended)
+- **npm** (comes with Node)
+- **git** (for cloning the repo)
+
+You can check your versions with:
+
+```bash
+node -v
+npm -v
+git --version
+```
 
 ---
 
@@ -105,7 +113,7 @@ git (if cloning from GitHub)
 Clone the repo (example):
 
 ```bash
-git clone https://github.com/<YOUR_USERNAME>/DePoker.git
+git clone https://github.com/cauhenrygu/DePoker.git
 cd DePoker
 ```
 
