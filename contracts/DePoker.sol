@@ -68,7 +68,7 @@ contract DePoker {
     /// @notice roomId + player => whether joined
     mapping(uint256 => mapping(address => bool)) public hasJoined;
 
-    /// @notice roomId + player => whether folded (cannot act or vote anymore)
+    /// @notice roomId + player => whether folded (cannot act anymore, but can still vote)
     mapping(uint256 => mapping(address => bool)) public hasFolded;
 
     /// @notice roomId => list of all actions in this room
@@ -303,10 +303,14 @@ contract DePoker {
         require(!hasFolded[roomId][msg.sender], "already folded");
 
         if (actionType == ActionType.Fold) {
-            // Fold: we ignore amount, and mark the player as folded.
+            // Fold: mark folded and always store amount = 0
             hasFolded[roomId][msg.sender] = true;
+            amount = 0;
+        } else if (actionType == ActionType.Check) {
+            // Check: must not change chips, so amount must be 0
+            require(amount == 0, "amount must be 0 for check");
         } else {
-            // For non-fold actions, we require a positive amount (chip units).
+            // Call / Bet / Raise: require a positive amount
             require(amount > 0, "amount must be > 0 for this action");
         }
 
@@ -323,14 +327,15 @@ contract DePoker {
     }
 
     /// @notice Vote for a winner after the offline round is finished.
-    /// @dev Only joined and non-folded players can vote; each address votes at most once.
+    /// @dev Only joined players can vote; folded players may still vote,
+    ///      but cannot be selected as winner. Each address votes at most once.
     function voteWinner(uint256 roomId, address candidate) external {
         _roomExists(roomId);
 
         RoomRuntime storage rt = roomRuntime[roomId];
         require(rt.state == RoomState.Started, "room not started");
         require(hasJoined[roomId][msg.sender], "not a player");
-        require(!hasFolded[roomId][msg.sender], "folded player cannot vote");
+        // folded players are allowed to vote (social consensus), so no hasFolded check here
         require(hasJoined[roomId][candidate], "candidate not in room");
         require(!hasFolded[roomId][candidate], "candidate folded");
         require(!hasVoted[roomId][msg.sender], "already voted");
@@ -356,6 +361,7 @@ contract DePoker {
         require(activePlayers > 0, "no active players");
 
         uint256 votes = voteCount[roomId][candidate];
+        // strict majority: votes > activePlayers / 2
         require(votes * 2 > activePlayers, "no majority for candidate");
 
         rt.state = RoomState.Settled;

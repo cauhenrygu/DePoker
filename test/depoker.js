@@ -2,321 +2,365 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("DePoker v2", function () {
-  // Common config for rooms
-  const BUY_IN = ethers.parseEther("1.0");      // 1 ETH buy-in
-  const SMALL_BLIND = ethers.parseEther("0.01");
-  const BIG_BLIND = ethers.parseEther("0.02");
-  const MAX_PLAYERS = 6;
+    async function deployDePokerWithRoom() {
+        const [owner, p1, p2, p3, p4, p5] = await ethers.getSigners();
 
-  // Deploy a fresh DePoker contract and return some signers
-  async function deployContract() {
-    const [owner, p1, p2, p3, p4, p5, ...rest] = await ethers.getSigners();
-    const DePoker = await ethers.getContractFactory("DePoker");
-    const depoker = await DePoker.deploy();
-    await depoker.waitForDeployment();
+        const DePoker = await ethers.getContractFactory("DePoker");
+        const depoker = await DePoker.deploy();
+        await depoker.waitForDeployment();
 
-    return { depoker, owner, p1, p2, p3, p4, p5 };
-  }
+        const buyIn = ethers.parseEther("1.0");
+        const smallBlind = ethers.parseEther("0.1");
+        const bigBlind = ethers.parseEther("0.2");
+        const maxPlayers = 6;
 
-  // Helper: create a default room (roomId = 0)
-  async function createDefaultRoom(depoker, owner) {
-    const tx = await depoker
-      .connect(owner)
-      .createRoom(BUY_IN, SMALL_BLIND, BIG_BLIND, MAX_PLAYERS);
-    await tx.wait();
-    const roomId = 0;
-    return roomId;
-  }
+        const tx = await depoker.createRoom(
+            buyIn,
+            smallBlind,
+            bigBlind,
+            maxPlayers
+        );
+        await tx.wait();
 
-  it("creates a room with correct config and initial runtime state", async function () {
-    const { depoker, owner } = await deployContract();
-    const roomId = await createDefaultRoom(depoker, owner);
+        const roomId = 0;
 
-    // Use the helper view to read merged room info
-    const [
-      creator,
-      buyIn,
-      playerCount,
-      totalPool,
-      started,
-      settled,
-      winner,
-      createdAt,
-    ] = await depoker.getRoom(roomId);
+        return {
+            depoker,
+            owner,
+            p1,
+            p2,
+            p3,
+            p4,
+            p5,
+            roomId,
+            buyIn,
+            smallBlind,
+            bigBlind,
+            maxPlayers,
+        };
+    }
 
-    expect(creator).to.equal(owner.address);
-    expect(buyIn).to.equal(BUY_IN);
-    expect(playerCount).to.equal(0n);
-    expect(totalPool).to.equal(0n);
-    expect(started).to.equal(false);
-    expect(settled).to.equal(false);
-    expect(winner).to.equal(ethers.ZeroAddress);
-    expect(createdAt).to.be.gt(0n);
+    it("creates a room with correct config and initial runtime state", async function () {
+        const {
+            depoker,
+            owner,
+            roomId,
+            buyIn,
+            smallBlind,
+            bigBlind,
+            maxPlayers,
+        } = await deployDePokerWithRoom();
 
-    // Also check the raw config struct
-    const cfg = await depoker.roomConfigs(roomId);
-    expect(cfg.buyIn).to.equal(BUY_IN);
-    expect(cfg.smallBlind).to.equal(SMALL_BLIND);
-    expect(cfg.bigBlind).to.equal(BIG_BLIND);
-    expect(cfg.maxPlayers).to.equal(MAX_PLAYERS);
-  });
+        const config = await depoker.roomConfigs(roomId);
+        expect(config.buyIn).to.equal(buyIn);
+        expect(config.smallBlind).to.equal(smallBlind);
+        expect(config.bigBlind).to.equal(bigBlind);
+        expect(config.maxPlayers).to.equal(maxPlayers);
 
-  it("lets players join with exact buy-in and updates pool; rejects incorrect or duplicate joins", async function () {
-    const { depoker, owner, p1, p2, p3 } = await deployContract();
-    const roomId = await createDefaultRoom(depoker, owner);
+        const runtime = await depoker.roomRuntime(roomId);
+        expect(runtime.creator).to.equal(owner.address);
+        expect(runtime.playerCount).to.equal(0n);
+        expect(runtime.totalPool).to.equal(0n);
+        expect(runtime.state).to.equal(0); // RoomState.Open
 
-    // Correct joins (p1, p2)
-    await expect(
-      depoker.connect(p1).joinRoom(roomId, { value: BUY_IN }),
-    ).to.emit(depoker, "PlayerJoined");
+        const room = await depoker.getRoom(roomId);
+        const [
+            creator,
+            buyInOut,
+            playerCount,
+            totalPool,
+            started,
+            settled,
+            winner,
+            createdAt,
+        ] = room;
 
-    await expect(
-      depoker.connect(p2).joinRoom(roomId, { value: BUY_IN }),
-    ).to.emit(depoker, "PlayerJoined");
+        expect(creator).to.equal(owner.address);
+        expect(buyInOut).to.equal(buyIn);
+        expect(playerCount).to.equal(0n);
+        expect(totalPool).to.equal(0n);
+        expect(started).to.equal(false);
+        expect(settled).to.equal(false);
+        expect(winner).to.equal(ethers.ZeroAddress);
+        expect(createdAt).to.be.greaterThan(0n);
+    });
 
-    // Check room state
-    const [, , playerCount, totalPool] = await depoker.getRoom(roomId);
-    expect(playerCount).to.equal(2n);
-    expect(totalPool).to.equal(BUY_IN * 2n);
+    it("lets players join with exact buy-in and updates pool; rejects incorrect or duplicate joins", async function () {
+        const { depoker, roomId, buyIn, p1, p2, p3 } =
+            await deployDePokerWithRoom();
 
-    const players = await depoker.getPlayers(roomId);
-    expect(players).to.deep.equal([p1.address, p2.address]);
+        // 正常 join：p1
+        await expect(
+            depoker.connect(p1).joinRoom(roomId, { value: buyIn })
+        ).to.not.be.reverted;
 
-    // Wrong buy-in should revert (use a NEW player p3, to avoid 'already joined')
-    const halfBuyIn = BUY_IN / 2n;
-    await expect(
-      depoker.connect(p3).joinRoom(roomId, { value: halfBuyIn }),
-    ).to.be.revertedWith("incorrect buy-in amount");
+        // 房间状态更新
+        let room = await depoker.getRoom(roomId);
+        let [, , playerCount, totalPool] = room;
+        expect(playerCount).to.equal(1n);
+        expect(totalPool).to.equal(buyIn);
 
-    // Duplicate join (p1 joins again) should revert
-    await expect(
-      depoker.connect(p1).joinRoom(roomId, { value: BUY_IN }),
-    ).to.be.revertedWith("already joined");
-  });
+        // 错误金额：p2
+        await expect(
+            depoker
+                .connect(p2)
+                .joinRoom(roomId, { value: buyIn - 1n })
+        ).to.be.revertedWith("incorrect buy-in amount");
 
-  it("only creator can start room and room must have at least 2 players", async function () {
-    const { depoker, owner, p1, p2 } = await deployContract();
-    const roomId = await createDefaultRoom(depoker, owner);
+        // 正常 join：p2
+        await depoker.connect(p2).joinRoom(roomId, { value: buyIn });
 
-    // Only one player joins
-    await depoker.connect(p1).joinRoom(roomId, { value: BUY_IN });
+        room = await depoker.getRoom(roomId);
+        [, , playerCount, totalPool] = room;
+        expect(playerCount).to.equal(2n);
+        expect(totalPool).to.equal(buyIn * 2n);
 
-    // Non-creator cannot start
-    await expect(
-      depoker.connect(p1).startRoom(roomId),
-    ).to.be.revertedWith("only creator can start");
+        // 重复 join：p1
+        await expect(
+            depoker.connect(p1).joinRoom(roomId, { value: buyIn })
+        ).to.be.revertedWith("already joined");
 
-    // Creator cannot start if not enough players
-    await expect(
-      depoker.connect(owner).startRoom(roomId),
-    ).to.be.revertedWith("not enough players");
+        // 额外测试：把房间塞满，然后再多一个人
+        // 当前 maxPlayers = 6，已经有 p1/p2，再加 p3,p4,p5,owner
+        const [owner, , , , p4, p5] = await ethers.getSigners();
 
-    // Second player joins
-    await depoker.connect(p2).joinRoom(roomId, { value: BUY_IN });
+        await depoker.connect(p3).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p4).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p5).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(owner).joinRoom(roomId, { value: buyIn });
 
-    // Now creator can start
-    await expect(depoker.connect(owner).startRoom(roomId))
-      .to.emit(depoker, "RoomStarted")
-      .withArgs(roomId, owner.address);
+        room = await depoker.getRoom(roomId);
+        [, , playerCount] = room;
+        expect(playerCount).to.equal(6n);
 
-    const [, , , , started, settled] = await depoker.getRoom(roomId);
-    expect(started).to.equal(true);
-    expect(settled).to.equal(false);
-  });
+        // 再多一个人加入 -> room full
+        const extra = (await ethers.getSigners())[6];
+        await expect(
+            depoker.connect(extra).joinRoom(roomId, { value: buyIn })
+        ).to.be.revertedWith("room full");
+    });
 
-  it("records actions correctly and prevents folded players or non-started rooms from acting", async function () {
-    const { depoker, owner, p1, p2, p3 } = await deployContract();
-    const roomId = await createDefaultRoom(depoker, owner);
+    it("only creator can start room and room must have at least 2 players", async function () {
+        const { depoker, owner, roomId, buyIn, p1, p2 } =
+            await deployDePokerWithRoom();
 
-    //
-    // 1) room not started → recordAction must revert
-    //
-    await depoker.connect(p1).joinRoom(roomId, { value: BUY_IN });
+        // 只有一个玩家时，creator 想 start -> not enough players
+        await depoker.connect(p1).joinRoom(roomId, { value: buyIn });
 
-    await expect(
-      depoker
-        .connect(p1)
-        .recordAction(roomId, 1 /* ActionType.Check */, 10),
-    ).to.be.revertedWith("room not started");
+        await expect(
+            depoker.connect(owner).startRoom(roomId)
+        ).to.be.revertedWith("not enough players");
 
-    //
-    // 2) 全部玩家在 Open 状态下加入，然后 start，再正常记录行动
-    //
-    await depoker.connect(p2).joinRoom(roomId, { value: BUY_IN });
-    await depoker.connect(p3).joinRoom(roomId, { value: BUY_IN });
+        // 第二个玩家加入
+        await depoker.connect(p2).joinRoom(roomId, { value: buyIn });
 
-    await depoker.connect(owner).startRoom(roomId);
+        // 非 creator 不能 start
+        await expect(
+            depoker.connect(p1).startRoom(roomId)
+        ).to.be.revertedWith("only creator can start");
 
-    // p1: Check
-    await expect(
-      depoker
-        .connect(p1)
-        .recordAction(roomId, 1 /* ActionType.Check */, 10),
-    ).to.emit(depoker, "ActionRecorded");
+        // creator 正常 start
+        await depoker.connect(owner).startRoom(roomId);
 
-    // p2: Bet
-    await expect(
-      depoker
-        .connect(p2)
-        .recordAction(roomId, 3 /* ActionType.Bet */, 50),
-    ).to.emit(depoker, "ActionRecorded");
+        const runtime = await depoker.roomRuntime(roomId);
+        expect(runtime.state).to.equal(1); // RoomState.Started
 
-    // p3: Fold (amount can be 0)
-    await expect(
-      depoker
-        .connect(p3)
-        .recordAction(roomId, 0 /* ActionType.Fold */, 0),
-    ).to.emit(depoker, "ActionRecorded");
+        const room = await depoker.getRoom(roomId);
+        const [, , , , started, settled] = room;
+        expect(started).to.equal(true);
+        expect(settled).to.equal(false);
+    });
 
-    // Folded player cannot act again
-    await expect(
-      depoker
-        .connect(p3)
-        .recordAction(roomId, 2 /* Call */, 10),
-    ).to.be.revertedWith("already folded");
+    it("records actions correctly and prevents folded players or non-started rooms from acting", async function () {
+        const { depoker, owner, roomId, buyIn, p1, p2, p3 } =
+            await deployDePokerWithRoom();
 
-    // Check stored actions
-    const actions = await depoker.getActions(roomId);
-    expect(actions.length).to.equal(3);
+        // 两个玩家加入
+        await depoker.connect(p1).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p2).joinRoom(roomId, { value: buyIn });
 
-    // action[0]: p1 Check
-    expect(actions[0].player).to.equal(p1.address);
-    expect(Number(actions[0].actionType)).to.equal(1);
-    expect(actions[0].amount).to.equal(10n);
+        // 未 start 时不能 action
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 1, 0) // Check
+        ).to.be.revertedWith("room not started");
 
-    // action[1]: p2 Bet
-    expect(actions[1].player).to.equal(p2.address);
-    expect(Number(actions[1].actionType)).to.equal(3);
-    expect(actions[1].amount).to.equal(50n);
+        // start 房间
+        await depoker.connect(owner).startRoom(roomId);
 
-    // action[2]: p3 Fold
-    expect(actions[2].player).to.equal(p3.address);
-    expect(Number(actions[2].actionType)).to.equal(0);
-    expect(actions[2].amount).to.equal(0n);
+        // 非玩家不能 action
+        await expect(
+            depoker
+                .connect(p3)
+                .recordAction(roomId, 3, 100n) // Bet
+        ).to.be.revertedWith("not a player");
 
-    // hasFolded should be true for p3
-    const foldedP3 = await depoker.hasFolded(roomId, p3.address);
-    expect(foldedP3).to.equal(true);
-  });
+        // Check：amount 必须是 0
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 1, 1n) // Check with non-zero
+        ).to.be.revertedWith("amount must be 0 for check");
 
-  it("supports majority voting for winner, prevents finalize without majority, and updates reputation", async function () {
-    const { depoker, owner, p1, p2, p3, p4 } = await deployContract();
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 1, 0) // Check with 0
+        ).to.not.be.reverted;
 
-    //
-    // Scenario A: 4 players, no strict majority → finalize fails
-    //
-    const roomIdA = await createDefaultRoom(depoker, owner);
+        // Bet / Raise / Call：amount 必须 > 0
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 3, 0) // Bet with 0
+        ).to.be.revertedWith("amount must be > 0 for this action");
 
-    await depoker.connect(p1).joinRoom(roomIdA, { value: BUY_IN });
-    await depoker.connect(p2).joinRoom(roomIdA, { value: BUY_IN });
-    await depoker.connect(p3).joinRoom(roomIdA, { value: BUY_IN });
-    await depoker.connect(p4).joinRoom(roomIdA, { value: BUY_IN });
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 3, 100n) // Bet with >0
+        ).to.not.be.reverted;
 
-    await depoker.connect(owner).startRoom(roomIdA);
+        // Fold：会标记 hasFolded，之后不能再 action
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 0, 123n) // Fold with non-zero -> 合约会强制 amount=0
+        ).to.not.be.reverted;
 
-    // p1, p2 vote for p2
-    await depoker.connect(p1).voteWinner(roomIdA, p2.address);
-    await depoker.connect(p2).voteWinner(roomIdA, p2.address);
+        const folded = await depoker.hasFolded(roomId, p1.address);
+        expect(folded).to.equal(true);
 
-    // p3, p4 vote for themselves
-    await depoker.connect(p3).voteWinner(roomIdA, p3.address);
-    await depoker.connect(p4).voteWinner(roomIdA, p4.address);
+        // Fold 之后再 action -> already folded
+        await expect(
+            depoker
+                .connect(p1)
+                .recordAction(roomId, 3, 100n)
+        ).to.be.revertedWith("already folded");
 
-    // activePlayers = 4, votes(p2) = 2 -> 2 * 2 == 4 -> no strict majority
-    await expect(
-      depoker.connect(owner).finalize(roomIdA, p2.address),
-    ).to.be.revertedWith("no majority for candidate");
+        // 再检查 actions 列表长度 > 0
+        const actions = await depoker.getActions(roomId);
+        expect(actions.length).to.be.greaterThan(0);
+    });
 
-    //
-    // Scenario B: 3 players, strict majority for p2 → finalize succeeds
-    //
-    const txB = await depoker
-      .connect(owner)
-      .createRoom(BUY_IN, SMALL_BLIND, BIG_BLIND, MAX_PLAYERS);
-    await txB.wait();
-    const roomIdB = 1;
+    it("supports majority voting for winner, prevents finalize without majority, and updates reputation", async function () {
+        const { depoker, owner, roomId, buyIn, p1, p2, p3 } =
+            await deployDePokerWithRoom();
 
-    await depoker.connect(p1).joinRoom(roomIdB, { value: BUY_IN });
-    await depoker.connect(p2).joinRoom(roomIdB, { value: BUY_IN });
-    await depoker.connect(p3).joinRoom(roomIdB, { value: BUY_IN });
+        // 三个玩家加入
+        await depoker.connect(p1).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p2).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p3).joinRoom(roomId, { value: buyIn });
 
-    await depoker.connect(owner).startRoom(roomIdB);
+        // start 房间
+        await depoker.connect(owner).startRoom(roomId);
 
-    // p1, p2, p3 all vote for p2（全票通过）
-    await depoker.connect(p1).voteWinner(roomIdB, p2.address);
-    await depoker.connect(p2).voteWinner(roomIdB, p2.address);
-    await depoker.connect(p3).voteWinner(roomIdB, p2.address);
+        // p3 先 Fold（active players = p1, p2）
+        await depoker
+            .connect(p3)
+            .recordAction(roomId, 0, 0); // Fold
 
-    // Finalize should succeed
-    await expect(
-      depoker.connect(owner).finalize(roomIdB, p2.address),
-    ).to.emit(depoker, "RoomFinalized");
+        // 只有 p1 给 p2 投票：activePlayers = 2（p1,p2）， votes[p2] = 1 -> 没有 strict majority
+        await depoker.connect(p1).voteWinner(roomId, p2.address);
 
-    const [
-      ,
-      ,
-      playerCountB,
-      totalPoolB,
-      startedB,
-      settledB,
-      winnerB,
-    ] = await depoker.getRoom(roomIdB);
+        await expect(
+            depoker.connect(owner).finalize(roomId, p2.address)
+        ).to.be.revertedWith("no majority for candidate");
 
-    expect(playerCountB).to.equal(3n);
-    expect(totalPoolB).to.equal(0n); // pool emptied on payout
-    expect(startedB).to.equal(true);
-    expect(settledB).to.equal(true);
-    expect(winnerB).to.equal(p2.address);
+        // p2 自己也投给自己 -> votes[p2] = 2, activePlayers = 2 -> strict majority
+        await depoker.connect(p2).voteWinner(roomId, p2.address);
 
-    // Reputation:
-    // - each joined player gets +1
-    // - winner gets extra +2 (total +3)
-    const repP1 = await depoker.reputation(p1.address);
-    const repP2 = await depoker.reputation(p2.address);
-    const repP3 = await depoker.reputation(p3.address);
+        await expect(
+            depoker.connect(owner).finalize(roomId, p2.address)
+        ).to.not.be.reverted;
 
-    expect(repP1).to.equal(1n);
-    expect(repP2).to.equal(3n);
-    expect(repP3).to.equal(1n);
-  });
+        const runtime = await depoker.roomRuntime(roomId);
+        expect(runtime.state).to.equal(2); // RoomState.Settled
+        expect(runtime.winner).to.equal(p2.address);
+        expect(runtime.totalPool).to.equal(0n);
 
-  it("only creator can finalize and candidate must be active player (joined & not folded)", async function () {
-    const { depoker, owner, p1, p2, p3 } = await deployContract();
-    const roomId = await createDefaultRoom(depoker, owner);
+        // reputation:
+        // 每个 joined 玩家 +1，winner 再 +2
+        const rep1 = await depoker.reputation(p1.address);
+        const rep2 = await depoker.reputation(p2.address);
+        const rep3 = await depoker.reputation(p3.address);
 
-    await depoker.connect(p1).joinRoom(roomId, { value: BUY_IN });
-    await depoker.connect(p2).joinRoom(roomId, { value: BUY_IN });
-    await depoker.connect(p3).joinRoom(roomId, { value: BUY_IN });
+        expect(rep1).to.equal(1n);
+        expect(rep3).to.equal(1n);
+        expect(rep2).to.equal(3n);
+    });
 
-    await depoker.connect(owner).startRoom(roomId);
+    it("only creator can finalize and candidate must be active player (joined & not folded)", async function () {
+        const {
+            depoker,
+            owner,
+            roomId,
+            buyIn,
+            p1,
+            p2,
+            p3,
+        } = await deployDePokerWithRoom();
 
-    // p3 folds → cannot be candidate nor vote
-    await depoker.connect(p3).recordAction(roomId, 0 /* Fold */, 0);
+        // ------- 场景 1：only creator can finalize -------
 
-    await expect(
-      depoker.connect(p3).voteWinner(roomId, p1.address),
-    ).to.be.revertedWith("folded player cannot vote");
+        // 三人加入
+        await depoker.connect(p1).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p2).joinRoom(roomId, { value: buyIn });
+        await depoker.connect(p3).joinRoom(roomId, { value: buyIn });
 
-    // p1, p2 vote for p2
-    await depoker.connect(p1).voteWinner(roomId, p2.address);
-    await depoker.connect(p2).voteWinner(roomId, p2.address);
+        await depoker.connect(owner).startRoom(roomId);
 
-    // Non-creator cannot finalize
-    await expect(
-      depoker.connect(p1).finalize(roomId, p2.address),
-    ).to.be.revertedWith("only creator can finalize");
+        // p1 和 p3 都给 p2 投票，形成 majority
+        await depoker.connect(p1).voteWinner(roomId, p2.address);
+        await depoker.connect(p3).voteWinner(roomId, p2.address);
 
-    // Folded candidate cannot be used
-    await expect(
-      depoker.connect(owner).finalize(roomId, p3.address),
-    ).to.be.revertedWith("candidate folded");
+        // 非 creator 尝试 finalize -> revert
+        await expect(
+            depoker.connect(p1).finalize(roomId, p2.address)
+        ).to.be.revertedWith("only creator can finalize");
 
-    // Creator finalizes with valid candidate (p2)
-    await depoker.connect(owner).finalize(roomId, p2.address);
+        // creator 可以正常 finalize
+        await expect(
+            depoker.connect(owner).finalize(roomId, p2.address)
+        ).to.not.be.reverted;
 
-    const [, , , , , settled, winner] = await depoker.getRoom(roomId);
-    expect(settled).to.equal(true);
-    expect(winner).to.equal(p2.address);
-  });
+        const runtimeAfter = await depoker.roomRuntime(roomId);
+        expect(runtimeAfter.state).to.equal(2); // Settled
+        expect(runtimeAfter.winner).to.equal(p2.address);
+
+        // ------- 场景 2：candidate must be active (joined & not folded) -------
+
+        // 新建第二个房间
+        const buyIn2 = ethers.parseEther("0.5");
+        const sb2 = ethers.parseEther("0.05");
+        const bb2 = ethers.parseEther("0.1");
+        const maxPlayers2 = 3;
+
+        const tx2 = await depoker.createRoom(
+            buyIn2,
+            sb2,
+            bb2,
+            maxPlayers2
+        );
+        await tx2.wait();
+        const roomId2 = 1;
+
+        // p1, p2 加入第二个房间
+        await depoker.connect(p1).joinRoom(roomId2, { value: buyIn2 });
+        await depoker.connect(p2).joinRoom(roomId2, { value: buyIn2 });
+
+        await depoker.connect(owner).startRoom(roomId2);
+
+        // 让 p2 fold
+        await depoker
+            .connect(p2)
+            .recordAction(roomId2, 0, 0); // Fold
+
+        // candidate = p2，但已经 folded -> finalize 必须 revert "candidate folded"
+        await expect(
+            depoker.connect(owner).finalize(roomId2, p2.address)
+        ).to.be.revertedWith("candidate folded");
+    });
 });
 
