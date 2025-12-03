@@ -210,7 +210,7 @@ Basic usage (default: 5 players, 1 ETH buy-in)
 
 ```bash
 cd DePoker
-npx hardhat run --network localhost scripts/demo_round.js
+npx hardhat run --network localhost scripts/demo_round_v4.js
 ```
 
 Customize number of players
@@ -218,7 +218,7 @@ Customize number of players
 Use environment variable NUM_PLAYERS (minimum 2, maximum 19):
 
 ```bash
-NUM_PLAYERS=7 npx hardhat run --network localhost scripts/demo_round.js
+NUM_PLAYERS=7 npx hardhat run --network localhost scripts/demo_round_v4.js
 ```
 
 Customize buy-in amount
@@ -226,7 +226,7 @@ Customize buy-in amount
 Use BUY_IN_ETH (string passed to ethers.parseEther):
 
 ```bash
-NUM_PLAYERS=6 BUY_IN_ETH=0.5 npx hardhat run --network localhost scripts/demo_round.js
+NUM_PLAYERS=6 BUY_IN_ETH=0.5 npx hardhat run --network localhost scripts/demo_round_v4.js
 ```
 
 Example output (6 players, 0.5 ETH):
