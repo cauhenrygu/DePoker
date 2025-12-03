@@ -202,13 +202,11 @@ npx hardhat test test/depoker2.js
 Expected result (example):
 
 ~~~text
-  DePoker2
-    ✓ creates a room with correct buy-in and initial state
-    ✓ lets players join and updates pool
-    ✓ only creator can start and room must have at least 2 players
-    ✓ runs a full game and updates reputation
+  DePoker2 basic flow
+    ✓ runs a full room lifecycle and updates reputation
 
-  4 passing (XXXms)
+
+  1 passing (XXXms)
 ~~~
 
 ---
@@ -248,7 +246,7 @@ Network: localhost, using 10 participants
 Using DePoker2 at: 0x5FbD...
 Creating room with buy-in = 1 ETH ...
 Room created, id = 0
-Player 0 (...) joining room ...
+Player i (...) joining room ...
 ...
 After joins: playerCount = 10 pot = 10.0 ETH
 Starting room ...
@@ -257,8 +255,7 @@ Player i (...) voting for WINNER ...
 Finalizing room ...
 Room settled = true winner = 0x....
 Reputation scores:
-  Player 0 (...): rep = 1
-  Player 1 (...): rep = 1
+  Player i (...): rep = 1
   ...
 ~~~
 
@@ -294,7 +291,7 @@ npx hardhat run --network localhost scripts/demo_depoker2_round_v2.js
 # ...
 ~~~
 
-As long as the local node stays open, `roomId` will keep increasing (0, 1, 2, 3, …) and reputations will accumulate across rounds.
+As long as the local node stays open, `roomId` will keep increasing (0, 1, 2, 3, …) and reputations will accumulate across rounds, but also differ as there are always "dishonest players".
 
 ---
 
