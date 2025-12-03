@@ -1,330 +1,360 @@
-# DePoker ♠️ – Decentralized Poker Settlement Demo
+# DePoker2 ♠️ – Local Settlement & Reputation Demo
 
-DePoker is a **smart-contract–based settlement system** for friendly Texas Hold'em games.
+DePoker2 is a **smart-contract–based settlement and reputation system** for friendly poker games.
 
-In a typical student / friends’ poker night:
+- Players buy in with ETH into an on-chain pool  
+- After the (offline / online) game, everyone **votes on the winner**  
+- The contract enforces a **strict-majority rule** and pays out the pot  
+- A simple **reputation score** records how often each address votes “correctly” and/or wins
 
-- Everyone brings cash / Venmo / WeChat…
-- Someone becomes the “human settlement engine”
-- Newcomers / friends-of-friends may not be fully trusted
-- History is hard to track (who won / lost how much over time)
-
-DePoker aims to provide a **transparent, auditable, on-chain settlement layer**:
-
-- Players **buy in with ETH** into a shared on-chain pool
-- After the offline game, players **vote on the winner**
-- The contract enforces a **strict majority rule** and pays out the entire pool
-- All logic is encoded in Solidity and tested via Hardhat
-
-> ⚠️ This is a **course project demo** and is **not** intended for real-money gambling on mainnet.
+> ⚠️ DePoker2 is a **course / research prototype**, not audited, and **must not** be used for real-money gambling on mainnet.  
+> Use only on local or test networks with test ETH.
 
 ---
 
-## Features (Current MVP)
+## 1. Repository Layout
 
-Smart contract `DePoker.sol` (deployed on a local Hardhat network) supports:
+Recommended structure for this repo (`DePoker`):
 
-- `createRoom(buyIn)`
-  - Owner creates a new poker room
-  - Sets a fixed buy-in amount (e.g. `1 ETH` or `0.5 ETH`)
-  - Room has an ID (first room is `roomId = 0`)
-
-- `joinRoom(roomId)` (payable)
-  - Players join by sending exactly `buyIn` ETH
-  - The contract tracks:
-    - number of players
-    - total pool (`playerCount * buyIn`)
-  - Prevents:
-    - joining after the room is started / settled
-    - joining with incorrect amount
-    - joining the same room twice
-
-- `startRoom(roomId)`
-  - Can only be called by the room creator
-  - Requires at least **2 players**
-  - Locks the room for voting & settlement
-
-- `voteWinner(roomId, candidate)`
-  - Each joined player can vote **once** for any player address in the room
-  - Votes are stored on-chain
-
-- `finalize(roomId, declaredWinner)`
-  - Only the room creator can call it
-  - The contract:
-    - Counts votes for all candidates
-    - Ensures `declaredWinner` has a **strict majority** (> 50% of votes)
-    - Transfers the **entire ETH pool** to the winner
-    - Marks the room as `settled = true`
-  - If no strict majority, the call reverts (e.g. `"no majority for candidate"`)
-
-All of this is covered by automated tests and a demo script.
-
----
-
-## Tech Stack
-
-- **Language:** Solidity `0.8.x`
-- **Framework:** Hardhat (JavaScript project)
-- **Testing:** Mocha + Chai via `@nomicfoundation/hardhat-toolbox`
-- **Runtime:** Node.js (tested with modern LTS, e.g. 20+)
-- **Local chain:** `npx hardhat node`
-
----
-
-## Project Structure
-
-Key files in this repository:
-
-```text
-.
+~~~text
+DePoker/
 ├── contracts/
-│   └── DePoker.sol          # Core smart contract
+│   └── DePoker2.sol
 ├── scripts/
-│   ├── deploy_depoker.js    # Deploys the DePoker contract to a network
-│   └── demo_round.js        # End-to-end demo: one full game round
+│   ├── deploy_depoker2.js
+│   ├── demo_depoker2_round_v1.js   # scripted demo – everyone votes correctly
+│   └── demo_depoker2_round_v2.js   # scripted demo – random winners + noisy voters
 ├── test/
-│   └── depoker.js           # Hardhat test suite (4 tests, all passing)
-├── hardhat.config.js        # Hardhat configuration
-└── README.md                # This file
-```
+│   └── depoker2.js                 # Hardhat test suite
+├── deployments/
+│   └── localhost-DePoker2.json     # Saved deployment info (address, etc.)
+├── docs/
+│   ├── DePoker2-local-test.md           # Local multi-player scripted test guide
+│   └── DePoker2-3players-local-test.md  # 3 players / 3 terminals manual guide
+├── hardhat.config.js
+└── README.md                        # This file
+~~~
 
 ---
 
-## Prerequisites
+## 2. Prerequisites
 
-Make sure you have:
+Please install:
 
-- **Node.js** ≥ 20 (LTS recommended)
-- **npm** (comes with Node)
-- **git** (for cloning the repo)
+- **Node.js ≥ 20** (LTS recommended)  
+- **npm** (comes with Node.js)  
+- **git**
 
-You can check your versions with:
+Check versions:
 
-```bash
+~~~bash
 node -v
 npm -v
 git --version
-```
+~~~
+
+If Node.js is not installed:
+
+Install via `nvm` (Node Version Manager), then:
+
+  ~~~bash
+  nvm install --lts
+  nvm use --lts
+  ~~~
 
 ---
 
-## Install & Build
+## 3. Install & Build
 
-Clone the repo (example):
+Clone the repo:
 
-```bash
+~~~bash
 git clone https://github.com/cauhenrygu/DePoker.git
 cd DePoker
-```
+~~~
 
 Install dependencies:
 
-```bash
+~~~bash
 npm install
-```
+~~~
 
 Compile contracts:
 
-```bash
+~~~bash
 npx hardhat compile
-```
+~~~
 
 ---
 
-## Run Automated Tests
+## 4. Contract Overview – DePoker2.sol
 
-The project includes a test suite that covers:
+`DePoker2` extends the original single-room DePoker idea with:
 
-Room creation & initial state
-Player joins & pool updates
-Start-room permissions & player count checks
-Full 3-player game flow (join → start → vote → finalize → payout)
+### 4.1 Multiple Rooms
 
-Run the tests:
+- Rooms are stored in a mapping `rooms[roomId]`.
+- `roomId` is an incrementing counter `nextRoomId` (0, 1, 2, …).
+- Each room stores:
+  - `creator` – address of the room owner
+  - `buyIn` – fixed ETH amount each player must send
+  - `playerCount`
+  - `totalPool`
+  - `started` / `settled` flags
+  - `winner` – final winner address
+  - `players[]` and helper mappings (e.g. joined / voted)
 
-```bash
-npx hardhat test test/depoker.js
-```
+### 4.2 Core Functions
 
-You should see:
+- `createRoom(uint256 buyIn)`
+  - Creates a new room with given `buyIn`.
+  - Returns the newly assigned `roomId` (also emitted in `RoomCreated` event).
+- `joinRoom(uint256 roomId)` (payable)
+  - Player sends exactly `buyIn` ETH.
+  - Checks:
+    - Room exists and is **not** settled.
+    - Room is **not** started yet.
+    - `msg.value == buyIn`.
+    - Same address cannot join twice.
+  - Updates `playerCount` and `totalPool`.
+- `startRoom(uint256 roomId)`
+  - Only `creator` can call.
+  - Requires at least 2 players.
+  - Locks the room for voting & settlement.
+- `voteWinner(uint256 roomId, address candidate)`
+  - Only joined players can vote.
+  - Each address can vote **once per room**.
+  - `candidate` must be one of the room’s players.
+  - Votes are stored in per-room mappings.
+- `finalize(uint256 roomId, address declaredWinner)`
+  - Only `creator` can call.
+  - Counts votes, checks that `declaredWinner` has a **strict majority** (> 50%).
+  - Transfers the entire `totalPool` to the winner.
+  - Marks room as `settled = true`.
 
-```text
-  DePoker
-    ✓ creates a room with correct buy-in and initial state
-    ✓ lets players join with exact buy-in and updates pool
-    ✓ only creator can start and room must have at least 2 players
-    ✓ runs a full 3-player game and pays majority winner
+### 4.3 Reputation System
 
-  4 passing (XXXms)
-```
+- `mapping(address => int256) public reputation;`
+- On `finalize`:
+  - Every player who voted for the actual winner gets `+1` reputation.
+  - Players who voted incorrectly may get `0` or a penalty (depending on your current version).
+  - The winner may also receive additional reputation if desired.
+- Anyone can query:
+  - `getReputation(address player)` – returns current reputation score for that address.
+
+Reputation naturally accumulates across **multiple rooms**, as long as the same wallet address is reused.
 
 ---
 
-## Running a Local Network
+## 5. Start Local Hardhat Node
 
-Start a local Hardhat node in Terminal 1:
+In **Terminal 1**:
 
-```bash
+~~~bash
 cd DePoker
 npx hardhat node
-```
+~~~
 
-You will see 20 test accounts, each with 10,000 ETH (testnet ETH, not real).
+You should see output listing 20 test accounts, each with **10,000 ETH** (test ETH).
 
-Keep this terminal open.
+> ✅ Keep Terminal 1 open and running the node the whole time.
 
 ---
 
-## Deployment Script
+## 6. Deploy DePoker2 Locally
 
-In Terminal 2, you can deploy the contract to the local node:
+Open **Terminal 2**:
 
-```bash
+~~~bash
 cd DePoker
-npx hardhat run --network localhost scripts/deploy_depoker.js
-```
+npx hardhat run --network localhost scripts/deploy_depoker2.js
+~~~
 
-You will see output like:
+Typical output:
 
-```text
-Deploying DePoker with account: 0xf39F...
-DePoker deployed at: 0x5FbD...
-```
+~~~text
+DePoker2 deployed to: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+Saved deployment info to /home/you/DePoker/deployments/localhost-DePoker2.json
+~~~
 
-This gives you a real contract address on the local dev chain.
+- The script deploys `DePoker2` to the local Hardhat node.
+- The deployed address is also saved into `deployments/localhost-DePoker2.json`, so other scripts can read it automatically.
 
 ---
 
-## Demo Script: One Full Game Round
+## 7. Automated Tests
 
-The script scripts/demo_round.js runs a full end-to-end scenario:
+The test file `test/depoker2.js` covers (examples):
 
-Deploys DePoker
-Creates a room with configurable buy-in
-Lets N players join
-Starts the room
-Simulates a vote with a strict majority winner
-Finalizes the room and prints the winner’s balance change
+- Room creation & initial state
+- Player joins & pool updates
+- Start-room permissions & minimum player checks
+- Full game flow: create → join → start → vote → finalize → payout
+- Reputation updates for correct vs incorrect voting (depending on version)
 
-Basic usage (default: 5 players, 1 ETH buy-in)
+Run tests in **Terminal 2** (or any new terminal, while the node is running):
 
-```bash
+~~~bash
 cd DePoker
-npx hardhat run --network localhost scripts/demo_round_v4.js
-```
+npx hardhat test test/depoker2.js
+~~~
 
-Customize number of players
+Expected result (example):
 
-Use environment variable NUM_PLAYERS (minimum 2, maximum 19):
+~~~text
+  DePoker2
+    ✓ creates a room with correct buy-in and initial state
+    ✓ lets players join and updates pool
+    ✓ only creator can start and room must have at least 2 players
+    ✓ runs a full game and updates reputation
 
-```bash
-NUM_PLAYERS=7 npx hardhat run --network localhost scripts/demo_round_v4.js
-```
+  4 passing (XXXms)
+~~~
 
-Customize buy-in amount
+---
 
-Use BUY_IN_ETH (string passed to ethers.parseEther):
+## 8. Demo Scripts
 
-```bash
-NUM_PLAYERS=6 BUY_IN_ETH=0.5 npx hardhat run --network localhost scripts/demo_round_v4.js
-```
+DePoker2 comes with two scripted demo rounds:
 
-Example output (6 players, 0.5 ETH):
+- `demo_depoker2_round_v1.js`
+  - Deterministic: **fixed winner**, everyone votes correctly.
+  - Good for sanity check that pool and reputation all behave as expected.
+- `demo_depoker2_round_v2.js`
+  - **Random winner** each time.
+  - 10 players join the room (owner + 9 others).
+  - For each round:
+    - 8 players vote correctly for the true winner.
+    - 2 players just vote for themselves.  
+  - After several runs, reputation scores diverge and look more “realistic”.
 
-```text
-=== DePoker Demo Round ===
-Owner: 0xf39F...
-Players (6): [ ... ]
-DePoker deployed at: 0xA51c...
-Room 0 created ... with buy-in 0.5 ETH
-- Player joined: ...
+### 8.1 Demo v1 – All Honest Voters
+
+In **Terminal 2** (node still running in Terminal 1):
+
+~~~bash
+cd DePoker
+# Make sure contract is deployed:
+npx hardhat run --network localhost scripts/deploy_depoker2.js
+
+# Run the simple demo:
+npx hardhat run --network localhost scripts/demo_depoker2_round_v1.js
+~~~
+
+Sample output (simplified):
+
+~~~text
+Network: localhost, using 10 participants
+Using DePoker2 at: 0x5FbD...
+Creating room with buy-in = 1 ETH ...
+Room created, id = 0
+Player 0 (...) joining room ...
 ...
-After join: playerCount=6, totalPool=3.0 ETH
-Room started=false, settled=false
-Room started by owner.
-Room started flag now: true
-Simulated majority winner: 0x7099...
-Voting plan: winner will receive 4 votes out of 6 players
-Vote: voter ... -> ...
+After joins: playerCount = 10 pot = 10.0 ETH
+Starting room ...
+Player i (...) voting for WINNER ...
 ...
-Winner balance before: 10008.9998... ETH
-Room finalized.
-=== Final Room State ===
-creator:      0xf39F...
-buyIn:        0.5 ETH
-playerCount:  6n
-totalPool:    0.0 ETH
-started:      true
-settled:      true
-winner:       0x7099...
-Winner balance after:  10011.9998... ETH
-Winner net change (approx, minus gas): 3.0 ETH
-=== Demo round finished ===
-```
+Finalizing room ...
+Room settled = true winner = 0x....
+Reputation scores:
+  Player 0 (...): rep = 1
+  Player 1 (...): rep = 1
+  ...
+~~~
 
-It shows that
+### 8.2 Demo v2 – Random Winner + Noisy Voters
 
-Total pool = NUM_PLAYERS × BUY_IN_ETH
-Pool goes to the strictly majority-voted winner
-State is transparently recorded on-chain
+Run:
 
----
+~~~bash
+cd DePoker
+# (Optional) re-deploy if needed:
+npx hardhat run --network localhost scripts/deploy_depoker2.js
 
-## How This Maps to Real Poker Nights
+# Run the stochastic demo:
+npx hardhat run --network localhost scripts/demo_depoker2_round_v2.js
+~~~
 
-In a real-life student poker group:
+Each run will:
 
-Before the game:
+1. Read the deployed DePoker2 address from `deployments/localhost-DePoker2.json`.  
+2. Create a new room with `roomId = nextRoomId`.  
+3. Join 10 players (owner + 9 others).  
+4. Randomly pick a winner index between 0 and 9.  
+5. Let 8 players vote correctly, 2 players vote for themselves.  
+6. Call `finalize` and print:
+   - Final `winner` address
+   - Updated reputation score for each player
 
-Everyone buys chips by sending stablecoins/ETH → joinRoom()
+You can run this script repeatedly:
 
-During the game:
+~~~bash
+npx hardhat run --network localhost scripts/demo_depoker2_round_v2.js
+npx hardhat run --network localhost scripts/demo_depoker2_round_v2.js
+# ...
+~~~
 
-Game itself stays off-chain (physical cards / online room)
-
-After the game:
-
-All players vote for the true winner → voteWinner()
-
-Contract checks majority and automatically settles → finalize()
-
-This demo currently focuses on the settlement & voting layer.
-Future extensions (out of current MVP scope but planned):
-
-Reputation system (players gain/lose reputation based on honest voting)
-
-Anti-collusion mechanics
-
-On-chain rewards (NFT badges for high-reputation players)
-
-Frontend (React + ethers.js) to replace manual scripts
+As long as the local node stays open, `roomId` will keep increasing (0, 1, 2, 3, …) and reputations will accumulate across rounds.
 
 ---
 
-## Development Notes
+## 9. Docs Overview
 
-This repo uses Hardhat + JavaScript (not TypeScript) for simplicity.
+The `docs/` folder contains more detailed guides:
 
-All examples assume running on localhost Hardhat network.
+### 9.1 `docs/DePoker2-local-test.md`
 
-Gas fee parameters can be customized in scripts (e.g. via getFeeData),
-but on local node the exact values don’t matter economically.
+- Step-by-step **local scripted test guide**.
+- Shows how to:
+  - Start Hardhat node
+  - Deploy DePoker2
+  - Run the demo scripts
+  - Inspect room state and reputation changes
+
+Suitable for: **quick local smoke test** with everything happening from one terminal / machine.
+
+### 9.2 `docs/DePoker2-3players-local-test.md`
+
+- Manual **3-player / 3-terminal** test:
+  - Terminal 1: room owner (creates room, starts room, finalizes)
+  - Terminal 2: Player 1 (joins, votes)
+  - Terminal 3: Player 2 (joins, votes)
+- Reproduces the “owner + p1 + p2” workflow you tested by hand:
+  - `createRoom`
+  - each address `joinRoom`
+  - `startRoom`
+  - each address `voteWinner`
+  - `finalize`
+  - check `getRoom` and `getReputation` for all three
+
+Suitable for: **live demo** where three people each control their own terminal / wallet.
 
 ---
 
-## Disclaimer
+## 10. Development Notes & Future Work
 
-DePoker is a research / educational prototype for a course on
-Web3 / blockchain app design.
-
-Not audited
-
-Not for production
-
-Not for real-money gambling on mainnet
-
-Use only on local or test networks, with test ETH.
+- Tech stack:
+  - Solidity 0.8.x
+  - Hardhat (JavaScript)
+  - ethers.js v6
+- Designed primarily for **local Hardhat**; can be ported to testnets with proper configuration.
+- Potential extensions:
+  - More sophisticated reputation scoring (penalties, decay, etc.)
+  - Anti-collusion rules and multi-winner settlements
+  - Frontend (React + ethers.js) for real-time voting UI
+  - Off-chain sign-in / DID integration so “real people” can be mapped to addresses
 
 ---
 
+## 11. Disclaimer
 
+DePoker2 is an **educational prototype** created for a Web3 / blockchain course.
+
+- Not audited  
+- No guarantees about security or economic soundness  
+- Not for real-money gambling or production use  
+
+Please use it only:
+
+- On local Hardhat nodes, or  
+- On public test networks with **test ETH only**.
