@@ -30,6 +30,9 @@ contract DePoker2 {
     // consecutive wrong votes across rooms
     mapping(address => uint8) public consecutiveWrongVotes;
 
+    // minimum reputation required to join any room
+    int256 public constant MIN_REPUTATION_TO_JOIN = -3;
+
     // -------- Events --------
 
     event RoomCreated(uint256 indexed roomId, address indexed creator, uint256 buyIn);
@@ -93,8 +96,11 @@ contract DePoker2 {
         require(!room.settled, "room already settled");
         require(msg.value == room.buyIn, "incorrect buy-in amount");
         require(!room.joined[msg.sender], "already joined");
-        // block players with reputation strictly below -100
-        require(reputation[msg.sender] >= -3, "reputation too low");
+        // block players with reputation strictly below threshold
+        require(
+            reputation[msg.sender] >= MIN_REPUTATION_TO_JOIN,
+            "reputation too low"
+        );
 
         room.joined[msg.sender] = true;
         room.players.push(msg.sender);
@@ -168,9 +174,8 @@ contract DePoker2 {
         for (uint256 i = 0; i < room.playerCount; i++) {
             address player = room.players[i];
 
-            if (player == winner) {
-                reputation[player] += int256(1);
-            }
+            // winner no longer gets an extra point just for winning
+            // reputation is driven by voting behavior only
 
             if (!room.hasVoted[player]) {
                 continue;
@@ -180,13 +185,16 @@ contract DePoker2 {
             bool votedCorrect = (votedFor == winner);
 
             if (votedCorrect) {
+                // correct vote: +1, reset wrong streak
                 reputation[player] += int256(1);
                 consecutiveWrongVotes[player] = 0;
             } else {
+                // wrong vote: -1 for this round
                 uint8 newCount = consecutiveWrongVotes[player] + 1;
                 consecutiveWrongVotes[player] = newCount;
 
                 if (newCount >= 2) {
+                    // second wrong in a row: heavy penalty -10 and reset streak
                     reputation[player] -= int256(10);
                     consecutiveWrongVotes[player] = 0;
                 } else {
